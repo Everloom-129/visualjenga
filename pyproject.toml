@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "visual-jenga"
+version = "0.1.0"
+description = "Visual Jenga: Discovering Object Dependencies via Counterfactual Inpainting"
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.1.0",
+    "torchvision>=0.16.0",
+    "diffusers>=0.27.0",
+    "transformers>=4.40.0",
+    "accelerate>=0.28.0",
+    "open-clip-torch>=2.24.0",
+    "timm>=0.9.0",
+    "Pillow>=10.0.0",
+    "numpy>=1.26.0",
+    "opencv-python>=4.9.0",
+    "tqdm>=4.66.0",
+    "huggingface-hub>=0.22.0",
+    "einops>=0.7.0",
+    "sam-2>=1.0.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[tool.uv.sources]
+"sam-2" = { git = "https://github.com/facebookresearch/sam2.git" }

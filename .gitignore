@@ -1,0 +1,75 @@
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# data
+data/
+
+
+# Packaging/build
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# uv / lockfiles (keep uv.lock if you want reproducible envs)
+.python-version
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Tests/coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.ruff_cache/
+.mypy_cache/
+
+# IDE/editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Local data / outputs (don’t commit large files)
+data/datasets/**/*
+data/**/raw/**/*
+data/**/processed/**/*
+outputs/
+results/
+runs/
+wandb/
+mlruns/
+
+# Model weights / checkpoints
+checkpoints/
+weights/
+models/
+*.ckpt
+*.pth
+*.pt
+*.safetensors
+*.bin
+
+# Media artifacts
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.gif
+*.webm
+*.zip
+*.tar
+*.tar.gz
+*.7z
+
+# Streamlit
+.streamlit/secrets.toml
