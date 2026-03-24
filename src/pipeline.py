@@ -55,7 +55,7 @@ class VisualJengaPipeline:
         self.max_steps = max_steps
         self.verbose = verbose
 
-        self._detector = MolmoDetector(device=device)
+        self._detector = MolmoDetector(device=device, debug=verbose)
         self._segmenter = SAM2Segmenter(device=device)
         self._inpainter = SDInpainter(device=device)
         self._sim_model = SimilarityModel(device=device)

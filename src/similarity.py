@@ -12,9 +12,13 @@ from __future__ import annotations
 from typing import Optional
 
 import numpy as np
+from PIL import Image
+
 import torch
 import torch.nn.functional as F
-from PIL import Image
+
+import open_clip
+from transformers import AutoImageProcessor, AutoModel as HFAutoModel
 
 
 # ---------------------------------------------------------------------------
@@ -50,7 +54,6 @@ class SimilarityModel:
     def _load_clip(self):
         if self._clip_model is not None:
             return
-        import open_clip
         print(f"[SimilarityModel] Loading CLIP {_CLIP_MODEL_NAME} ...")
         model, _, preprocess = open_clip.create_model_and_transforms(
             _CLIP_MODEL_NAME, pretrained=_CLIP_PRETRAINED
@@ -63,10 +66,9 @@ class SimilarityModel:
     def _load_dino(self):
         if self._dino_model is not None:
             return
-        from transformers import AutoImageProcessor, AutoModel
         print(f"[SimilarityModel] Loading DINOv2 {_DINO_MODEL_NAME} ...")
         self._dino_processor = AutoImageProcessor.from_pretrained(_DINO_MODEL_NAME)
-        self._dino_model = AutoModel.from_pretrained(_DINO_MODEL_NAME).to(self.device).eval()
+        self._dino_model = HFAutoModel.from_pretrained(_DINO_MODEL_NAME).to(self.device).eval()
         print("[SimilarityModel] DINOv2 loaded.")
 
     # ------------------------------------------------------------------

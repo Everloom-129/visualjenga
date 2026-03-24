@@ -1,0 +1,1 @@
+python run_jenga.py -i data/datasets/coco/000/img.jpeg -o results

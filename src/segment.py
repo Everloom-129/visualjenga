@@ -12,16 +12,11 @@ from __future__ import annotations
 from typing import Optional
 
 import numpy as np
-import torch
 from PIL import Image
 
-# SAM2 imports — installed from facebookresearch/sam2
-try:
-    from sam2.build_sam import build_sam2
-    from sam2.sam2_image_predictor import SAM2ImagePredictor
-    _SAM2_AVAILABLE = True
-except ImportError:
-    _SAM2_AVAILABLE = False
+import torch
+from sam2.build_sam import build_sam2_hf  # noqa: F401 (used in _load)
+from sam2.sam2_image_predictor import SAM2ImagePredictor
 
 
 SAM2_MODEL_CFG = "sam2_hiera_large.yaml"
@@ -32,11 +27,6 @@ _IOU_DEDUP_THRESHOLD = 0.85
 
 class SAM2Segmenter:
     def __init__(self, device: Optional[str] = None):
-        if not _SAM2_AVAILABLE:
-            raise ImportError(
-                "sam2 package not found. Install via: "
-                "pip install 'git+https://github.com/facebookresearch/sam2.git'"
-            )
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self._predictor: Optional[SAM2ImagePredictor] = None
 
@@ -44,7 +34,6 @@ class SAM2Segmenter:
         if self._predictor is not None:
             return
         print(f"[SAM2Segmenter] Loading SAM2 ({SAM2_CHECKPOINT}) ...")
-        from sam2.build_sam import build_sam2_hf
         model = build_sam2_hf(SAM2_CHECKPOINT, device=self.device)
         self._predictor = SAM2ImagePredictor(model)
         print("[SAM2Segmenter] Model loaded.")

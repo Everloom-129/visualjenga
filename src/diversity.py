@@ -34,27 +34,35 @@ _CROP_SIZE = 224  # CLIP and DINO both expect 224×224
 # ---------------------------------------------------------------------------
 
 def _tight_square_bbox(mask: np.ndarray) -> tuple[int, int, int, int]:
-    """Return (x0, y0, x1, y1) of the smallest SQUARE bounding box containing mask."""
+    """Return (x0, y0, x1, y1) of the smallest SQUARE bounding box containing mask.
+
+    All indices are exclusive at the end (i.e., mask[y0:y1, x0:x1] contains
+    every True pixel in the mask).
+    """
     rows = np.any(mask, axis=1)
     cols = np.any(mask, axis=0)
-    r0, r1 = np.where(rows)[0][[0, -1]]
-    c0, c1 = np.where(cols)[0][[0, -1]]
+    # Use exclusive end indices so Python slicing works correctly
+    r0 = int(np.where(rows)[0][0])
+    r1 = int(np.where(rows)[0][-1]) + 1   # exclusive
+    c0 = int(np.where(cols)[0][0])
+    c1 = int(np.where(cols)[0][-1]) + 1   # exclusive
 
-    h = int(r1 - r0 + 1)
-    w = int(c1 - c0 + 1)
+    h = r1 - r0
+    w = c1 - c0
     side = max(h, w)
 
     # Centre the square over the tight bbox
+    H, W = mask.shape
     cy = (r0 + r1) // 2
     cx = (c0 + c1) // 2
-    H, W = mask.shape
+
     y0 = max(0, cy - side // 2)
-    x0 = max(0, cx - side // 2)
     y1 = min(H, y0 + side)
-    x1 = min(W, x0 + side)
-    # Re-anchor if clipped
     if y1 - y0 < side:
         y0 = max(0, y1 - side)
+
+    x0 = max(0, cx - side // 2)
+    x1 = min(W, x0 + side)
     if x1 - x0 < side:
         x0 = max(0, x1 - side)
 

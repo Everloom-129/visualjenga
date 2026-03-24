@@ -14,11 +14,11 @@ from __future__ import annotations
 
 from typing import Optional
 
-import cv2
 import numpy as np
-import torch
 from PIL import Image
 
+import cv2
+import torch
 from diffusers import StableDiffusionInpaintPipeline
 
 
@@ -40,9 +40,9 @@ _GUIDANCE_SCALE = 7.5
 
 
 class SDInpainter:
-    def __init__(self, device: Optional[str] = None, dtype=torch.float16):
+    def __init__(self, device: Optional[str] = None, dtype=None):
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-        self.dtype = dtype
+        self.dtype = dtype or torch.float16
         self._pipe: Optional[StableDiffusionInpaintPipeline] = None
 
     def _load(self):
@@ -91,7 +91,7 @@ class SDInpainter:
                 guidance_scale=_GUIDANCE_SCALE,
                 generator=generator,
             ).images[0]
-            results.append(out)
+            results.append(out.resize(image.size, Image.LANCZOS))
         return results
 
     def remove(
@@ -120,7 +120,7 @@ class SDInpainter:
             guidance_scale=_GUIDANCE_SCALE,
             generator=generator,
         ).images[0]
-        return result
+        return result.resize(image.size, Image.LANCZOS)
 
     def unload(self):
         self._pipe = None
