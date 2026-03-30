@@ -55,6 +55,66 @@ class TestParsePoints:
         objs = _parse_points(text)
         assert objs[0].label == "laptop"
 
+    def test_points_tag_closed(self):
+        text = (
+            '<points x1="19.5" y1="21.5" x2="40.5" y2="82.0" '
+            'alt="objects">objects</points>'
+        )
+        objs = _parse_points(text)
+        assert len(objs) == 2
+        assert pytest.approx(objs[0].x_frac, abs=1e-4) == 0.195
+        assert pytest.approx(objs[0].y_frac, abs=1e-4) == 0.215
+        assert objs[0].label == "objects"
+
+    def test_points_tag_truncated_no_closing(self):
+        """Molmo output truncated by max_new_tokens — no </points> tag."""
+        text = (
+            '<points x1="29.0" y1="88.6" x2="31.0" y2="80.5" '
+            'x3="33.0" y3="75.0" x4="34.0" y4="71.4"'
+        )
+        objs = _parse_points(text)
+        assert len(objs) == 4
+        assert pytest.approx(objs[0].x_frac, abs=1e-4) == 0.290
+        assert pytest.approx(objs[0].y_frac, abs=1e-4) == 0.886
+        assert objs[3].label == "object_4"
+
+    def test_points_tag_truncated_with_closing_angle(self):
+        """Truncated after > but before </points>."""
+        text = (
+            '<points x1="10.0" y1="20.0" x2="50.0" y2="60.0">'
+            'some partial text here'
+        )
+        objs = _parse_points(text)
+        assert len(objs) == 2
+
+    def test_points_tag_truncated_mid_attribute(self):
+        """Truncated in the middle of an attribute value."""
+        text = (
+            '<points x1="10.0" y1="20.0" x2="50.0" y2="60.0" '
+            'x3="70.0" y3="8'
+        )
+        objs = _parse_points(text)
+        assert len(objs) == 2  # x3/y3 pair is incomplete, only first 2 parsed
+
+    def test_points_tag_with_alt_label(self):
+        text = (
+            '<points x1="19.5" y1="21.5" x2="40.5" y2="82.0" '
+            'alt="foreground objects">foreground objects</points>'
+        )
+        objs = _parse_points(text)
+        assert len(objs) == 2
+        assert objs[0].label == "foreground objects"
+
+    def test_points_tag_truncated_alt_used_as_label(self):
+        """Truncated output with alt attr should use alt as label."""
+        text = (
+            '<points x1="19.5" y1="21.5" x2="40.5" y2="82.0" '
+            'alt="distinct objects"'
+        )
+        objs = _parse_points(text)
+        assert len(objs) == 2
+        assert objs[0].label == "distinct objects"
+
 
 # ---------------------------------------------------------------------------
 # DetectedObject.pixel_coords

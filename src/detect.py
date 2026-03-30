@@ -30,6 +30,10 @@ _POINTS_TAG_PATTERN = re.compile(
     r"<points\b([^>]*)>(.*?)</points>",
     re.IGNORECASE | re.DOTALL,
 )
+_POINTS_TAG_OPEN_PATTERN = re.compile(
+    r"<points\b([^>]*)>?(.*)",
+    re.IGNORECASE | re.DOTALL,
+)
 _XY_ATTR_PATTERN = re.compile(
     r'\bx(\d+)\s*=\s*"([0-9.]+)"\s+y\1\s*=\s*"([0-9.]+)"',
     re.IGNORECASE,
@@ -105,7 +109,7 @@ class MolmoDetector:
         with torch.inference_mode():
             output = self._model.generate_from_batch(
                 inputs,
-                GenerationConfig(max_new_tokens=512, stop_strings="<|endoftext|>"),
+                GenerationConfig(max_new_tokens=2048, stop_strings="<|endoftext|>"),
                 tokenizer=self._processor.tokenizer,
             )
 
@@ -162,22 +166,34 @@ def _parse_points(text: str, debug: bool = False) -> list[DetectedObject]:
     if objects:
         return objects
 
+    # Try the properly-closed tag first, then fall back to an open/truncated tag.
     points_tag_match = _POINTS_TAG_PATTERN.search(text)
+    truncated = False
+    if points_tag_match is None:
+        points_tag_match = _POINTS_TAG_OPEN_PATTERN.search(text)
+        truncated = True
     if points_tag_match is None:
         return objects
 
     attrs = points_tag_match.group(1) or ""
     inner_text = (points_tag_match.group(2) or "").strip()
+    if truncated:
+        inner_text = ""
     xy_matches = list(_XY_ATTR_PATTERN.finditer(attrs))
     if debug:
-        print(f"[MolmoDetector][debug] <points> xN/yN matches found: {len(xy_matches)}")
+        tag_kind = "truncated <points>" if truncated else "<points>"
+        print(f"[MolmoDetector][debug] {tag_kind} xN/yN matches found: {len(xy_matches)}")
+
+    # Extract the alt attribute as label if present
+    alt_match = re.search(r'alt="([^"]*)"', attrs)
+    alt_label = alt_match.group(1).strip() if alt_match else ""
 
     for idx, match in enumerate(xy_matches):
         x_frac = float(match.group(2)) / 100.0
         y_frac = float(match.group(3)) / 100.0
         x_frac = max(0.0, min(1.0, x_frac))
         y_frac = max(0.0, min(1.0, y_frac))
-        label = inner_text if inner_text else f"object_{idx + 1}"
+        label = inner_text or alt_label or f"object_{idx + 1}"
         objects.append(DetectedObject(label=label, x_frac=x_frac, y_frac=y_frac))
         if debug:
             print(
