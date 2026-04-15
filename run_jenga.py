@@ -41,6 +41,10 @@ def parse_args():
         "--device", type=str, default=None,
         help='CUDA device, e.g. "cuda:0". Auto-detected if not specified.',
     )
+    parser.add_argument(
+        "--remover", default="lama", choices=["lama", "sd"],
+        help="Removal backend: 'lama' (default) or 'sd' (SD1.5).",
+    )
     return parser.parse_args()
 
 
@@ -58,6 +62,7 @@ def main():
     print(f"n_samples:   {args.n}")
     print(f"max_steps:   {args.steps or 'unlimited'}")
     print(f"device:      {args.device or 'auto'}")
+    print(f"remover:     {args.remover}")
     print()
 
     pipeline = VisualJengaPipeline(
@@ -65,6 +70,7 @@ def main():
         n_samples=args.n,
         max_steps=args.steps,
         verbose=True,
+        remover=args.remover,
     )
 
     frames = pipeline.run(image, output_dir=args.output)

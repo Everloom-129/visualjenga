@@ -6,7 +6,7 @@ The GPU test checks end-to-end detection on a tiny image using the real model.
 """
 
 import pytest
-from src.detect import _parse_points, DetectedObject
+from src.detect import _parse_points, _sanitise_label, _nms_points, DetectedObject
 
 
 # ---------------------------------------------------------------------------
@@ -48,7 +48,7 @@ class TestParsePoints:
     def test_empty_label_replaced(self):
         text = '<point x="50.0" y="50.0">  </point>'
         objs = _parse_points(text)
-        assert objs[0].label == "object"
+        assert objs[0].label == "object_1"
 
     def test_whitespace_around_label(self):
         text = '<point x="50.0" y="50.0">  laptop  </point>'
@@ -67,15 +67,16 @@ class TestParsePoints:
         assert objs[0].label == "objects"
 
     def test_points_tag_truncated_no_closing(self):
-        """Molmo output truncated by max_new_tokens — no </points> tag."""
+        """Molmo output truncated by max_new_tokens — no </points> tag.
+        Points are spread far apart so NMS keeps all of them."""
         text = (
-            '<points x1="29.0" y1="88.6" x2="31.0" y2="80.5" '
-            'x3="33.0" y3="75.0" x4="34.0" y4="71.4"'
+            '<points x1="10.0" y1="10.0" x2="50.0" y2="50.0" '
+            'x3="80.0" y3="20.0" x4="20.0" y4="80.0"'
         )
         objs = _parse_points(text)
         assert len(objs) == 4
-        assert pytest.approx(objs[0].x_frac, abs=1e-4) == 0.290
-        assert pytest.approx(objs[0].y_frac, abs=1e-4) == 0.886
+        assert pytest.approx(objs[0].x_frac, abs=1e-4) == 0.100
+        assert pytest.approx(objs[0].y_frac, abs=1e-4) == 0.100
         assert objs[3].label == "object_4"
 
     def test_points_tag_truncated_with_closing_angle(self):
@@ -114,6 +115,108 @@ class TestParsePoints:
         objs = _parse_points(text)
         assert len(objs) == 2
         assert objs[0].label == "distinct objects"
+
+
+# ---------------------------------------------------------------------------
+# _sanitise_label — no GPU
+# ---------------------------------------------------------------------------
+
+class TestSanitiseLabel:
+
+    def test_normal_label_returned(self):
+        assert _sanitise_label("cat", fallback="x") == "cat"
+
+    def test_empty_string_uses_fallback(self):
+        assert _sanitise_label("", fallback="obj") == "obj"
+
+    def test_whitespace_only_uses_fallback(self):
+        assert _sanitise_label("   ", fallback="obj") == "obj"
+
+    def test_label_over_max_len_uses_fallback(self):
+        long_label = "a" * 61
+        assert _sanitise_label(long_label, fallback="obj") == "obj"
+
+    def test_echoed_prompt_text_uses_fallback(self):
+        echoed = "distinct object in this image. Include all foreground objects individually."
+        assert _sanitise_label(echoed, fallback="obj") == "obj"
+
+    def test_label_exactly_at_limit_kept(self):
+        label = "a" * 60
+        assert _sanitise_label(label, fallback="obj") == label
+
+
+# ---------------------------------------------------------------------------
+# _nms_points — no GPU
+# ---------------------------------------------------------------------------
+
+class TestNmsPoints:
+
+    def _pt(self, x, y, label="obj"):
+        return DetectedObject(label=label, x_frac=x, y_frac=y)
+
+    def test_far_apart_points_all_kept(self):
+        pts = [self._pt(0.1, 0.1), self._pt(0.5, 0.5), self._pt(0.9, 0.9)]
+        result = _nms_points(pts, min_dist=0.05)
+        assert len(result) == 3
+
+    def test_identical_points_collapsed_to_one(self):
+        pts = [self._pt(0.5, 0.5)] * 10
+        result = _nms_points(pts, min_dist=0.05)
+        assert len(result) == 1
+
+    def test_first_point_wins(self):
+        pts = [self._pt(0.5, 0.5, "first"), self._pt(0.51, 0.51, "second")]
+        result = _nms_points(pts, min_dist=0.05)
+        assert len(result) == 1
+        assert result[0].label == "first"
+
+    def test_empty_input(self):
+        assert _nms_points([], min_dist=0.05) == []
+
+    def test_evenly_spaced_diagonal_collapsed(self):
+        """40 points tracing a diagonal (the surfer bug) should collapse to a few."""
+        import math
+        pts = [self._pt(i / 40, i / 40) for i in range(40)]
+        result = _nms_points(pts, min_dist=0.05)
+        # Expect roughly ceil(sqrt(2) / 0.05) ≈ 28, but definitely far fewer than 40
+        assert len(result) < 40
+
+    def test_real_bug_reproduction(self):
+        """Reproduce the exact surfer detect.json: 40 diagonal points → significantly fewer.
+
+        The 40 points span ~88% of the image diagonally, so NMS at 0.05 reduces
+        them to ~14 (one kept per 0.05-radius zone along the diagonal).
+        SAM2's IoU dedup (segment.py) is the second stage that collapses these
+        remaining points to 1 mask since they all point at the same object.
+        """
+        raw = [
+            {"x_frac": 0.29 + i * 0.005, "y_frac": 0.886 - i * 0.022}
+            for i in range(40)
+        ]
+        pts = [DetectedObject(label="surfer", x_frac=d["x_frac"], y_frac=d["y_frac"]) for d in raw]
+        result = _nms_points(pts, min_dist=0.05)
+        # NMS removes ~65% of points; SAM2 IoU dedup handles the rest
+        assert len(result) < len(pts)
+        assert len(result) <= 15
+
+
+# ---------------------------------------------------------------------------
+# End-to-end: echoed prompt label from <points> tag (the actual surfer bug)
+# ---------------------------------------------------------------------------
+
+class TestEchoedPromptLabel:
+
+    def test_long_inner_text_becomes_object_N(self):
+        """When Molmo echoes the prompt as inner_text, labels must be object_N."""
+        echoed = "distinct object in this image. Include all foreground objects individually."
+        text = (
+            f'<points x1="10.0" y1="10.0" x2="80.0" y2="80.0">'
+            f'{echoed}</points>'
+        )
+        objs = _parse_points(text)
+        for obj in objs:
+            assert len(obj.label) <= 60
+            assert obj.label != echoed
 
 
 # ---------------------------------------------------------------------------

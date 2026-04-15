@@ -45,7 +45,7 @@ import torch
 
 from .detect import MolmoDetector, DetectedObject
 from .segment import SAM2Segmenter
-from .inpaint import SDInpainter
+from .inpaint import SDInpainter, LaMaRemover
 from .similarity import SimilarityModel
 from .diversity import diversity_score
 
@@ -76,6 +76,7 @@ class   VisualJengaPipeline:
         max_steps: Optional[int] = None,
         verbose: bool = True,
         save_inpaint_samples: bool = False,
+        remover: str = "lama",
     ):
         """
         Args:
@@ -84,12 +85,18 @@ class   VisualJengaPipeline:
             max_steps:            Maximum number of objects to remove (None = until empty).
             verbose:              Print progress messages.
             save_inpaint_samples: If True, save every SD sample to disk (disk-heavy).
+            remover:              Backend for the final removal step: "lama" (default) or "sd".
+                                  SD1.5 scores and LaMa removes by default; use "sd" to use
+                                  SD1.5 for both (matches original behaviour).
         """
+        if remover not in ("lama", "sd"):
+            raise ValueError(f"remover must be 'lama' or 'sd', got {remover!r}")
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.n_samples = n_samples
         self.max_steps = max_steps
         self.verbose = verbose
         self.save_inpaint_samples = save_inpaint_samples
+        self.remover = remover
 
     # ------------------------------------------------------------------
     # Public API
@@ -293,16 +300,30 @@ class   VisualJengaPipeline:
         _save(viz, os.path.join(step_dir, "pre_removal.png"))
 
         # ── 5. Remove ──────────────────────────────────────────────────
-        result = inpainter.remove(image, target.mask)
         safe_label = _safe_filename(target.detected.label)
+        if self.remover == "lama":
+            # Unload SD + similarity before loading LaMa to stay within GPU budget
+            inpainter.unload()
+            sim_model.unload()
+            del inpainter, sim_model
+            _free_gpu()
+            self._log("  [Phase B] SD + CLIP + DINO unloaded. Loading LaMa for removal ...")
+            remover_obj = LaMaRemover(device=self.device)
+            result = remover_obj.remove(image, target.mask)
+            remover_obj.unload()
+            del remover_obj
+            _free_gpu()
+            self._log("  [Phase B] LaMa unloaded. GPU memory freed.")
+        else:
+            # SD removal — inpainter is still loaded, use it directly
+            result = inpainter.remove(image, target.mask)
+            inpainter.unload()
+            sim_model.unload()
+            del inpainter, sim_model
+            _free_gpu()
+            self._log("  [Phase B] SD + CLIP + DINO unloaded. GPU memory freed.")
+
         _save(result, os.path.join(step_dir, f"removed_{safe_label}.png"))
-
-        inpainter.unload()
-        sim_model.unload()
-        del inpainter, sim_model
-        _free_gpu()
-        self._log("  [Phase B] SD + CLIP + DINO unloaded. GPU memory freed.")
-
         return result, scored
 
     # ------------------------------------------------------------------

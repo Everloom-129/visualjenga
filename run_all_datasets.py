@@ -172,12 +172,14 @@ def parse_args():
                    help="Root directory containing dataset sub-folders.")
     p.add_argument("--output-root", default="results/datasets",
                    help="Root directory for pipeline outputs.")
-    p.add_argument("--n", type=int, default=16,
+    p.add_argument("--n", type=int, default=3,
                    help="Inpainting samples per object for diversity scoring.")
     p.add_argument("--steps", type=int, default=None,
                    help="Max objects to remove per image (None = until empty).")
     p.add_argument("--device", default=None,
                    help='CUDA device, e.g. "cuda:0". Auto-detected if omitted.')
+    p.add_argument("--remover", default="lama", choices=["lama", "sd"],
+                   help="Removal backend: 'lama' (clean background, default) or 'sd' (SD1.5).")
     p.add_argument("--resume", action="store_true",
                    help="Skip images that already have a done.txt sentinel.")
     p.add_argument("--dry-run", action="store_true",
@@ -219,15 +221,16 @@ def main():
         project=args.wandb_project,
         entity=args.wandb_entity,
         name=args.wandb_run_name,
-        tags=["batch"] + args.datasets + args.wandb_tags,
+        tags=["batch", f"remover:{args.remover}"] + args.datasets + args.wandb_tags,
         config={
-            "datasets":    args.datasets,
-            "n_samples":   args.n,
-            "max_steps":   args.steps,
-            "device":      args.device or "auto",
+            "datasets":     args.datasets,
+            "n_samples":    args.n,
+            "max_steps":    args.steps,
+            "device":       args.device or "auto",
             "total_scenes": len(all_scenes),
-            "resume":      args.resume,
-            "dry_run":     args.dry_run,
+            "resume":       args.resume,
+            "dry_run":      args.dry_run,
+            "remover":      args.remover,
         },
     )
     print(f"W&B run: {run.url}\n")
@@ -247,6 +250,7 @@ def main():
             n_samples=args.n,
             max_steps=args.steps,
             verbose=True,
+            remover=args.remover,
         )
 
     # ── Main loop ─────────────────────────────────────────────────────────

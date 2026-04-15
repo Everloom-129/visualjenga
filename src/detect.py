@@ -39,10 +39,14 @@ _XY_ATTR_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-_DETECT_PROMPT = (
-    "Point to each distinct object in this image. "
-    "Include all foreground objects individually."
-)
+_DETECT_PROMPT = "Point to every distinct object."
+
+# Maximum character length for a label before we treat it as junk (e.g. echoed prompt text)
+_MAX_LABEL_LEN = 60
+
+# Minimum fractional distance between two kept points (NMS in normalised coords).
+# Two points closer than this are considered duplicates; the first one is kept.
+_NMS_MIN_DIST_FRAC = 0.05
 
 
 @dataclass
@@ -137,12 +141,39 @@ class MolmoDetector:
             torch.cuda.empty_cache()
 
 
+def _sanitise_label(raw: str, fallback: str) -> str:
+    """Return a clean object label, falling back when raw looks like echoed prompt text."""
+    label = raw.strip()
+    if not label or len(label) > _MAX_LABEL_LEN:
+        return fallback
+    return label
+
+
+def _nms_points(objects: list[DetectedObject], min_dist: float) -> list[DetectedObject]:
+    """
+    Spatial NMS: drop any point whose fractional distance to an earlier kept point
+    is less than `min_dist`.  Preserves insertion order (first-seen wins).
+    """
+    kept: list[DetectedObject] = []
+    for obj in objects:
+        too_close = any(
+            ((obj.x_frac - k.x_frac) ** 2 + (obj.y_frac - k.y_frac) ** 2) ** 0.5 < min_dist
+            for k in kept
+        )
+        if not too_close:
+            kept.append(obj)
+    return kept
+
+
 def _parse_points(text: str, debug: bool = False) -> list[DetectedObject]:
     """Parse Molmo point tags from generated text.
 
     Supported formats:
       1) <point x="42.1" y="67.3">label</point>
       2) <points x1="..." y1="..." x2="..." y2="..." ...>optional label</points>
+
+    After parsing, spatial NMS removes near-duplicate points (e.g. Molmo tracing
+    a single object with 40 evenly-spaced coordinates).
     """
     objects = []
     matches = list(_POINT_PATTERN.finditer(text))
@@ -151,10 +182,9 @@ def _parse_points(text: str, debug: bool = False) -> list[DetectedObject]:
     for idx, match in enumerate(matches):
         x_frac = float(match.group(1)) / 100.0  # Molmo outputs 0-100
         y_frac = float(match.group(2)) / 100.0
-        label = match.group(3).strip() or "object"
-        # Clamp to [0, 1]
         x_frac = max(0.0, min(1.0, x_frac))
         y_frac = max(0.0, min(1.0, y_frac))
+        label = _sanitise_label(match.group(3), fallback=f"object_{idx + 1}")
         objects.append(DetectedObject(label=label, x_frac=x_frac, y_frac=y_frac))
         if debug:
             print(
@@ -164,7 +194,7 @@ def _parse_points(text: str, debug: bool = False) -> list[DetectedObject]:
 
     # Fallback for Molmo outputs that use a single <points ...> tag with xN/yN attrs.
     if objects:
-        return objects
+        return _nms_points(objects, _NMS_MIN_DIST_FRAC)
 
     # Try the properly-closed tag first, then fall back to an open/truncated tag.
     points_tag_match = _POINTS_TAG_PATTERN.search(text)
@@ -188,16 +218,20 @@ def _parse_points(text: str, debug: bool = False) -> list[DetectedObject]:
     alt_match = re.search(r'alt="([^"]*)"', attrs)
     alt_label = alt_match.group(1).strip() if alt_match else ""
 
+    # inner_text can be the echoed prompt if Molmo misformats the tag — sanitise it
+    shared_label = _sanitise_label(inner_text, fallback="") or _sanitise_label(alt_label, fallback="")
+
     for idx, match in enumerate(xy_matches):
         x_frac = float(match.group(2)) / 100.0
         y_frac = float(match.group(3)) / 100.0
         x_frac = max(0.0, min(1.0, x_frac))
         y_frac = max(0.0, min(1.0, y_frac))
-        label = inner_text or alt_label or f"object_{idx + 1}"
+        label = shared_label or f"object_{idx + 1}"
         objects.append(DetectedObject(label=label, x_frac=x_frac, y_frac=y_frac))
         if debug:
             print(
                 f"[MolmoDetector][debug] ParsedFromPoints[{idx}]: "
                 f"label='{label}', x_frac={x_frac:.4f}, y_frac={y_frac:.4f}"
             )
-    return objects
+
+    return _nms_points(objects, _NMS_MIN_DIST_FRAC)
