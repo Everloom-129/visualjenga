@@ -73,7 +73,7 @@ class   VisualJengaPipeline:
         self,
         device: Optional[str] = None,
         n_samples: int = 16,
-        max_steps: Optional[int] = None,
+        max_steps: Optional[int] = 10,
         verbose: bool = True,
         save_inpaint_samples: bool = False,
         remover: str = "lama",
@@ -97,6 +97,18 @@ class   VisualJengaPipeline:
         self.verbose = verbose
         self.save_inpaint_samples = save_inpaint_samples
         self.remover = remover
+
+        # Mask cache: maps (x_frac, y_frac) → bool mask (H, W).
+        # Populated after each SAM2 segmentation; entries for the removed object
+        # and any points within _CACHE_INVALIDATION_RADIUS of the removal are
+        # dropped at the end of each step so stale masks don't persist.
+        self._mask_cache: dict[tuple[float, float], np.ndarray] = {}
+        # Fractional-coordinate radius within which a cached point is considered
+        # a match for a newly detected point (~2 % of image dimensions).
+        self._CACHE_HIT_RADIUS = 0.02
+        # Fractional-coordinate radius around the removed object within which
+        # cached masks are invalidated (neighbours may have shifted visually).
+        self._CACHE_INVALIDATION_RADIUS = 0.10
 
     # ------------------------------------------------------------------
     # Public API
@@ -123,8 +135,13 @@ class   VisualJengaPipeline:
             List of PIL images: [original, after step 1, after step 2, …]
         """
         os.makedirs(output_dir, exist_ok=True)
+        self._mask_cache.clear()
 
         current = image.convert("RGB")
+        H_img, W_img = current.size[1], current.size[0]
+        # Accumulate all removed pixels so we can skip re-detecting in those regions.
+        removed_union: np.ndarray = np.zeros((H_img, W_img), dtype=bool)
+
         frames: list[Image.Image] = [current.copy()]
         _save(current, os.path.join(output_dir, "step_00_original.png"))
         self._log(f"Output dir: {output_dir}")
@@ -146,7 +163,7 @@ class   VisualJengaPipeline:
 
             # ── Phase A: Detect + Segment ─────────────────────────────
             detected, masks = self._phase_a_detect_and_segment(
-                current, step, step_dir
+                current, step, step_dir, removed_union
             )
             if not detected:
                 self._log("  No objects detected — done.")
@@ -162,6 +179,13 @@ class   VisualJengaPipeline:
 
             current = result
             frames.append(current.copy())
+
+            # Grow removed_union and invalidate cache near the removed object.
+            if scored:
+                removed_det = scored[0].detected
+                removed_union |= scored[0].mask
+                self._cache_invalidate_near(removed_det.x_frac, removed_det.y_frac)
+
             if on_step_complete is not None:
                 on_step_complete(step, detected, scored, step_dir)
             step += 1
@@ -173,11 +197,32 @@ class   VisualJengaPipeline:
     # Phase A: Detect (Molmo) → unload → Segment (SAM2) → unload
     # ------------------------------------------------------------------
 
+    def _cache_lookup(self, x_frac: float, y_frac: float) -> np.ndarray | None:
+        """Return a cached mask if one exists within HIT_RADIUS, else None."""
+        for (cx, cy), mask in self._mask_cache.items():
+            dist = ((x_frac - cx) ** 2 + (y_frac - cy) ** 2) ** 0.5
+            if dist < self._CACHE_HIT_RADIUS:
+                return mask
+        return None
+
+    def _cache_invalidate_near(self, x_frac: float, y_frac: float):
+        """Drop all cache entries within INVALIDATION_RADIUS of (x_frac, y_frac)."""
+        to_drop = [
+            k for k, _ in self._mask_cache.items()
+            if ((x_frac - k[0]) ** 2 + (y_frac - k[1]) ** 2) ** 0.5
+               < self._CACHE_INVALIDATION_RADIUS
+        ]
+        for k in to_drop:
+            del self._mask_cache[k]
+        if to_drop:
+            self._log(f"  [cache] Invalidated {len(to_drop)} entries near ({x_frac:.3f}, {y_frac:.3f})")
+
     def _phase_a_detect_and_segment(
         self,
         image: Image.Image,
         step: int,
         step_dir: str,
+        removed_union: np.ndarray,
     ) -> tuple[list[DetectedObject], list[np.ndarray]]:
 
         # ── 1. Detect ──────────────────────────────────────────────────
@@ -204,24 +249,74 @@ class   VisualJengaPipeline:
         if not detected:
             return [], []
 
-        # ── 2. Segment ─────────────────────────────────────────────────
-        self._log("  [Phase A] Loading SAM2 ...")
-        segmenter = SAM2Segmenter(device=self.device)
-        W, H = image.size
-        points = [d.pixel_coords(W, H) for d in detected]
-        masks = segmenter.segment(image, points)
-        self._log(f"  [Phase A] Got {len(masks)} masks (after dedup).")
-        segmenter.unload()
-        del segmenter
-        _free_gpu()
-        self._log(f"  [Phase A] SAM2 unloaded. GPU memory freed.")
+        # ── 1b. Filter out detections that fall inside already-removed regions ──
+        W_img, H_img = image.size
+        if removed_union.any():
+            fresh = []
+            for det in detected:
+                px, py = det.pixel_coords(W_img, H_img)
+                px = max(0, min(W_img - 1, px))
+                py = max(0, min(H_img - 1, py))
+                if removed_union[py, px]:
+                    self._log(f"  [Phase A] Skipping '{det.label}' — point inside already-removed region")
+                else:
+                    fresh.append(det)
+            detected = fresh
+            if not detected:
+                self._log("  [Phase A] All detections are in removed regions — done.")
+                return [], []
 
-        # Align detected to masks (dedup may have shortened list)
-        if len(masks) < len(detected):
-            detected = detected[:len(masks)]
+        # ── 2. Segment (with cache) ────────────────────────────────────
+        # Split detected objects into cache hits and misses.
+        masks: list[np.ndarray | None] = []
+        new_det: list[DetectedObject] = []   # objects that need SAM2
+        new_idx: list[int] = []              # their positions in `masks`
+
+        n_hits = 0
+        for det in detected:
+            cached = self._cache_lookup(det.x_frac, det.y_frac)
+            if cached is not None:
+                masks.append(cached)
+                n_hits += 1
+            else:
+                masks.append(None)
+                new_det.append(det)
+                new_idx.append(len(masks) - 1)
+
+        self._log(f"  [Phase A] Mask cache: {n_hits} hits, {len(new_det)} misses out of {len(detected)}")
+
+        if new_det:
+            self._log("  [Phase A] Loading SAM2 for new objects ...")
+            segmenter = SAM2Segmenter(device=self.device)
+            W, H = image.size
+            points = [d.pixel_coords(W, H) for d in new_det]
+            new_masks = segmenter.segment(image, points)
+            segmenter.unload()
+            del segmenter
+            _free_gpu()
+            self._log(f"  [Phase A] SAM2 unloaded. GPU memory freed.")
+
+            # Fill in the misses and update the cache
+            # new_masks may be shorter than new_det due to dedup inside segment()
+            for i, new_mask in zip(new_idx, new_masks):
+                masks[i] = new_mask
+                det = detected[i]
+                self._mask_cache[(det.x_frac, det.y_frac)] = new_mask
+
+            # Drop any detected objects whose SAM2 mask was deduped away
+            if len(new_masks) < len(new_det):
+                # Positions that got a mask
+                filled = set(new_idx[:len(new_masks)])
+                detected = [d for i, d in enumerate(detected) if masks[i] is not None]
+                masks = [m for m in masks if m is not None]
+
+        # At this point all masks should be filled; drop any None stragglers
+        paired = [(d, m) for d, m in zip(detected, masks) if m is not None]
+        detected = [d for d, _ in paired]
+        masks_final = [m for _, m in paired]
 
         # Save each mask + overlay
-        for obj_idx, (det, mask) in enumerate(zip(detected, masks)):
+        for obj_idx, (det, mask) in enumerate(zip(detected, masks_final)):
             safe_label = _safe_filename(det.label)
             mask_uint8 = (mask.astype(np.uint8) * 255)
             Image.fromarray(mask_uint8, mode="L").save(
@@ -231,9 +326,9 @@ class   VisualJengaPipeline:
                 _draw_mask_overlay(image, mask, color=(220, 50, 50, 120)),
                 os.path.join(step_dir, f"mask_{obj_idx:02d}_{safe_label}_viz.png"),
             )
-        self._log(f"  [Phase A] Saved {len(masks)} mask images.")
+        self._log(f"  [Phase A] Saved {len(masks_final)} mask images.")
 
-        return detected, masks
+        return detected, masks_final
 
     # ------------------------------------------------------------------
     # Phase B: Score (SD + CLIP + DINO) → Remove (SD) → unload all

@@ -34,8 +34,8 @@ def parse_args():
         help="Number of inpainting samples per object for diversity scoring (default: 16).",
     )
     parser.add_argument(
-        "--steps", type=int, default=None,
-        help="Maximum number of objects to remove (default: until empty).",
+        "--steps", type=int, default=10,
+        help="Maximum number of objects to remove (default: 10).",
     )
     parser.add_argument(
         "--device", type=str, default=None,

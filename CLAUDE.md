@@ -23,17 +23,22 @@ uv run python run_jenga.py --image data/datasets/coco/000/img.jpeg --output resu
 
 ```bash
 # Run the pipeline on a single image
-uv run python run_jenga.py --image <path> --output <dir> [--n 16] [--steps N] [--device cuda:0]
+uv run python run_jenga.py --image <path> --output <dir> \
+    [--n 16] [--steps 10] [--remover lama|sd] [--device cuda:0]
 
-# Convenience script (uses data/datasets/coco/000/img.jpeg → results/)
-bash run_jenga.sh
+# Run full COCO dataset (edit MODEL= at top of script)
+bash process_coco.sh
 
 # Run across all datasets with W&B logging
 uv run python run_all_datasets.py [--datasets coco nyu clutteredparse] \
-    [--output-root results/datasets] [--n 16] [--steps N] \
+    [--data-root /path/to/data] [--output-root results/datasets] \
+    [--n 16] [--steps 10] [--remover lama|sd] \
     [--wandb-project visual-jenga] [--wandb-entity <team>] \
     [--resume]          # skip images that already have done.txt
     [--dry-run]         # discover scenes + log to W&B without running inference
+
+# Open Streamlit result browser
+bash open_dashboard.sh   # → http://localhost:8510
 
 # Tests
 bash run_tests.sh            # unit tests only (fast, no GPU)
@@ -54,7 +59,8 @@ uv run pytest tests/ -m "gpu and not slow" -v       # smoke GPU
 |------|-------|------|
 | `detect.py` | `MolmoDetector` | allenai/Molmo-7B-D-0924 — points at every distinct object |
 | `segment.py` | `SAM2Segmenter` | facebook/sam2-hiera-large — masks one object per point |
-| `inpaint.py` | `SDInpainter` | runwayml/stable-diffusion-inpainting — fills masked regions |
+| `inpaint.py` | `SDInpainter` | runwayml/stable-diffusion-inpainting — N diverse samples for scoring |
+| `inpaint.py` | `LaMaRemover` | big-lama — clean background removal for the final output frame |
 | `similarity.py` | `SimilarityModel` | CLIP ViT-L/14 + facebook/dinov2-base — pairwise similarity |
 | `diversity.py` | `diversity_score()` | Pure numpy — computes Eq. 2 using `SimilarityModel` |
 | `pipeline.py` | `VisualJengaPipeline` | Orchestrates all of the above |
@@ -66,10 +72,12 @@ Each step of the loop has two phases that must be kept separate (GPU memory):
 **Phase A** — load, run, unload before Phase B:
 1. **Detect** (Molmo): points at every object → `detect.json`, `detect_viz.png`
 2. **Segment** (SAM2): masks each point → `mask_OO_<label>.png` + overlay
+   - Results cached by detection point; SAM2 only runs for new/changed points
+   - Points inside already-removed regions are skipped entirely
 
-**Phase B** — load SD + CLIP + DINO together, then unload:
+**Phase B** — load SD + CLIP + DINO, score, unload, then load LaMa:
 3. **Score** each object: SD inpaints N samples → CLIP/DINO diversity score → `scores.json`
-4. **Remove** highest-scoring object → `removed_<label>.png`
+4. **Remove** highest-scoring object → LaMa clean removal → `removed_<label>.png`
 
 ### Output directory layout
 
@@ -90,9 +98,31 @@ output_dir/
 
 ## GPU Memory Management
 
-Molmo-7B alone takes ~14 GB bfloat16. SAM2 + SD + CLIP + DINO together take ~5 GB. Both cannot be loaded simultaneously on a 24 GB GPU (A10).
+Molmo-7B alone takes ~14 GB bfloat16. SAM2 + SD + CLIP + DINO + LaMa together take ~6 GB. Both cannot be loaded simultaneously on a 24 GB GPU (A10).
 
 The pipeline explicitly loads and unloads each model group per step. Every model class has an `unload()` method; after unloading, `_free_gpu()` calls `gc.collect()` + `torch.cuda.empty_cache()`. **Do not hold model references across phases.**
+
+Phase B load order (lama remover):
+1. Load SD + CLIP + DINO → score all objects → unload all three
+2. Load LaMa → remove chosen object → unload LaMa
+
+## Remover Backends
+
+`VisualJengaPipeline(remover="lama")` (default) uses LaMa for the final removal step.
+`VisualJengaPipeline(remover="sd")` uses SD1.5 for both scoring and removal (original behaviour).
+
+**Always use LaMa unless explicitly comparing against SD.** SD1.5 hallucinate replacement objects, causing Molmo to re-detect the same region in subsequent steps and producing extremely long loops.
+
+## Loop Guards
+
+Two mechanisms prevent infinite loops:
+
+1. **`removed_union`**: Union of all masks removed so far. Detection points falling inside this union are skipped before segmentation. Reset at the start of each `run()` call.
+2. **`max_steps`**: Hard cap on removals per image (default: 10). Override with `--steps N`.
+
+## Mask Cache
+
+`pipeline._mask_cache` maps `(x_frac, y_frac) → bool mask`. After each SAM2 call, results are stored. On subsequent steps, if Molmo detects a point within `_CACHE_HIT_RADIUS=0.02` of a cached point, the cached mask is reused (no SAM2 call). After a removal, all entries within `_CACHE_INVALIDATION_RADIUS=0.10` of the removed object's point are evicted so neighbours get re-segmented.
 
 ## Tests
 
@@ -110,4 +140,13 @@ Fixtures are defined in `tests/conftest.py`: `small_rgb_image` (64×64), `square
 Example datasets live in `data/datasets/`. Download with:
 ```bash
 uv run python download_dataset.py
+```
+
+Actual experiment data lives at `/mnt/sda/edward/data_visualjenga/`:
+```
+/mnt/sda/edward/data_visualjenga/
+  coco/                    # input images (000–200)
+  results/
+    coco_lama/             # outputs from LaMa remover run
+    coco_sd/               # outputs from SD1.5 remover run
 ```

@@ -174,8 +174,8 @@ def parse_args():
                    help="Root directory for pipeline outputs.")
     p.add_argument("--n", type=int, default=3,
                    help="Inpainting samples per object for diversity scoring.")
-    p.add_argument("--steps", type=int, default=None,
-                   help="Max objects to remove per image (None = until empty).")
+    p.add_argument("--steps", type=int, default=10,
+                   help="Max objects to remove per image (default: 10).")
     p.add_argument("--device", default=None,
                    help='CUDA device, e.g. "cuda:0". Auto-detected if omitted.')
     p.add_argument("--remover", default="lama", choices=["lama", "sd"],
