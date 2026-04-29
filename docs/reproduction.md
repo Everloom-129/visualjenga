@@ -76,7 +76,7 @@ The following walkthrough traces one complete rollout on COCO image 000 with the
 
 ### Original Image
 
-![Original input image](../../static/img/jenga/coco_lama/000/step_00_original.png)
+![Original input image](coco_lama/step_00_original.png)
 
 *`step_00_original.png` — the raw input image before any removal.*
 
@@ -86,13 +86,13 @@ The following walkthrough traces one complete rollout on COCO image 000 with the
 
 **Detect:** Molmo scans the full scene and marks every distinct object with a coloured dot.
 
-![Step 1 — detection dots](../../static/img/jenga/coco_lama/000/step_01/detect_viz.png)
+![Step 1 — detection dots](coco_lama/step_01/detect_viz.png)
 
 *`step_01/detect_viz.png` — coloured dots mark each detected object. Each dot corresponds to a `(label, x_frac, y_frac)` entry in `detect.json`.*
 
 **Segment:** SAM2 generates a binary mask for each detection point. The mask is stored both as a binary PNG and as a semi-transparent red overlay for inspection.
 
-![Step 1 — mask overlay](../../static/img/jenga/coco_lama/000/step_01/mask_00_distinct_object__viz.png)
+![Step 1 — mask overlay](coco_lama/step_01/mask_00_distinct_object__viz.png)
 
 *`step_01/mask_00_distinct_object__viz.png` — red-tint overlay shows the segmented object region.*
 
@@ -100,11 +100,11 @@ The following walkthrough traces one complete rollout on COCO image 000 with the
 
 **Remove:** The object with the highest diversity score is annotated with a yellow dot, then removed by LaMa.
 
-![Step 1 — pre-removal annotation](../../static/img/jenga/coco_lama/000/step_01/pre_removal.png)
+![Step 1 — pre-removal annotation](coco_lama/step_01/pre_removal.png)
 
 *`step_01/pre_removal.png` — yellow dot and score label mark the chosen object before removal.*
 
-![Step 1 — after removal](../../static/img/jenga/coco_lama/000/step_01/removed_distinct_object_.png)
+![Step 1 — after removal](coco_lama/step_01/removed_distinct_object_.png)
 
 *`step_01/removed_distinct_object_.png` — LaMa fills the masked region with plausible background texture.*
 
@@ -114,19 +114,19 @@ The following walkthrough traces one complete rollout on COCO image 000 with the
 
 The updated image (output of step 1) is passed back to Molmo for re-detection.
 
-![Step 2 — image entering step](../../static/img/jenga/coco_lama/000/step_02/original.png)
+![Step 2 — image entering step](coco_lama/step_02/original.png)
 
 *`step_02/original.png` — the updated image entering step 2.*
 
-![Step 2 — detection dots](../../static/img/jenga/coco_lama/000/step_02/detect_viz.png)
+![Step 2 — detection dots](coco_lama/step_02/detect_viz.png)
 
 *`step_02/detect_viz.png` — Molmo re-detects objects on the modified scene. Already-removed regions are masked via `removed_union` and any detections inside them are skipped.*
 
-![Step 2 — pre-removal annotation](../../static/img/jenga/coco_lama/000/step_02/pre_removal.png)
+![Step 2 — pre-removal annotation](coco_lama/step_02/pre_removal.png)
 
 *`step_02/pre_removal.png` — the next highest-scoring object is selected.*
 
-![Step 2 — after removal](../../static/img/jenga/coco_lama/000/step_02/removed_distinct_object_.png)
+![Step 2 — after removal](coco_lama/step_02/removed_distinct_object_.png)
 
 *`step_02/removed_distinct_object_.png` — background reconstruction after the second removal.*
 
@@ -134,19 +134,19 @@ The updated image (output of step 1) is passed back to Molmo for re-detection.
 
 ### Step 3
 
-![Step 3 — image entering step](../../static/img/jenga/coco_lama/000/step_03/original.png)
+![Step 3 — image entering step](coco_lama/step_03/original.png)
 
 *`step_03/original.png` — the image after two objects have been removed.*
 
-![Step 3 — detection dots](../../static/img/jenga/coco_lama/000/step_03/detect_viz.png)
+![Step 3 — detection dots](coco_lama/step_03/detect_viz.png)
 
 *`step_03/detect_viz.png` — Molmo detects the remaining objects. The pipeline continues until no objects are found or `max_steps` is reached.*
 
-![Step 3 — pre-removal annotation](../../static/img/jenga/coco_lama/000/step_03/pre_removal.png)
+![Step 3 — pre-removal annotation](coco_lama/step_03/pre_removal.png)
 
 *`step_03/pre_removal.png` — third object selected for removal.*
 
-![Step 3 — after removal](../../static/img/jenga/coco_lama/000/step_03/removed_distinct_object_.png)
+![Step 3 — after removal](coco_lama/step_03/removed_distinct_object_.png)
 
 *`step_03/removed_distinct_object_.png` — scene progressively simplified toward an empty background.*
 
@@ -181,7 +181,7 @@ The pipeline supports two removal backends, selectable via `--remover lama` (def
 
 | LaMa (default) | SD1.5 |
 |----------------|-------|
-| ![LaMa step 1 removal](../../static/img/jenga/coco_lama/000/step_01/removed_distinct_object_.png) | ![SD step 1 removal](../../static/img/jenga/coco_sd/000/step_01/removed_distinct_object_.png) |
+| ![LaMa step 1 removal](coco_lama/step_01/removed_distinct_object_.png) | ![SD step 1 removal](coco_sd/step_01/removed_distinct_object_.png) |
 | Clean background reconstruction | May hallucinate a replacement object |
 
 ### Why LaMa Is Preferred
