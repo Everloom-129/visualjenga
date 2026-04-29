@@ -71,11 +71,11 @@ Always use `--remover lama` (the default). SD1.5 removal hallucinates replacemen
 
 ## Step-by-Step Walkthrough
 
-The following walkthrough traces one complete rollout on COCO image `000` with the LaMa remover.
+The following walkthrough traces one complete rollout on COCO scene 002 (a dog resting on a bed) with the LaMa remover.
 
 ### Original Image
 
-![Original input image](../../static/img/jenga/coco_lama/000/step_00_original.png)
+![Original input image](./coco_lama/step_00_original.png)
 
 *`step_00_original.png` — the raw input image before any removal.*
 
@@ -85,67 +85,67 @@ The following walkthrough traces one complete rollout on COCO image `000` with t
 
 **Detect:** Molmo scans the full scene and marks every distinct object.
 
-![Step 1 — detection dots](../../static/img/jenga/coco_lama/000/step_01/detect_viz.png)
+![Step 1 — detection dots](./coco_lama/step_01/detect_viz.png)
 
-*`step_01/detect_viz.png` — coloured dots mark each detected object.*
+*`step_01/detect_viz.png` — coloured dots mark each of the 7 detected objects.*
 
 **Segment:** SAM2 generates a binary mask for each detection point.
 
-![Step 1 — mask overlay](../../static/img/jenga/coco_lama/000/step_01/mask_00_person_viz.png)
+![Step 1 — mask overlay](./coco_lama/step_01/mask_00_distinct_object__viz.png)
 
-*`step_01/mask_00_person_viz.png` — red-tint overlay shows the segmented object.*
+*`step_01/mask_00_distinct_object__viz.png` — red-tint overlay shows the segmented object.*
 
 **Score:** SD 1.5 generates 16 inpainting samples per object; CLIP and DINOv2 compare each to the original crop to produce a diversity score per object.
 
 **Remove:** The object with the highest diversity score is selected and removed with LaMa.
 
-![Step 1 — pre-removal annotation](../../static/img/jenga/coco_lama/000/step_01/pre_removal.png)
+![Step 1 — pre-removal annotation](./coco_lama/step_01/pre_removal.png)
 
 *`step_01/pre_removal.png` — yellow dot marks the chosen object with its score.*
 
-![Step 1 — after removal](../../static/img/jenga/coco_lama/000/step_01/removed_person.png)
+![Step 1 — after removal](./coco_lama/step_01/removed_distinct_object_.png)
 
-*`step_01/removed_person.png` — LaMa fills the region with plausible background.*
+*`step_01/removed_distinct_object_.png` — LaMa fills the region with plausible background.*
 
 ---
 
 ### Step 2
 
-![Step 2 — image entering step](../../static/img/jenga/coco_lama/000/step_02/original.png)
+![Step 2 — image entering step](./coco_lama/step_02/original.png)
 
 *`step_02/original.png` — the updated image entering step 2.*
 
-![Step 2 — detection dots](../../static/img/jenga/coco_lama/000/step_02/detect_viz.png)
+![Step 2 — detection dots](./coco_lama/step_02/detect_viz.png)
 
 *`step_02/detect_viz.png` — Molmo re-runs on the modified scene.*
 
-![Step 2 — pre-removal annotation](../../static/img/jenga/coco_lama/000/step_02/pre_removal.png)
+![Step 2 — pre-removal annotation](./coco_lama/step_02/pre_removal.png)
 
 *`step_02/pre_removal.png` — next highest-scoring object selected.*
 
-![Step 2 — after removal](../../static/img/jenga/coco_lama/000/step_02/removed_chair.png)
+![Step 2 — after removal](./coco_lama/step_02/removed_distinct_object_.png)
 
-*`step_02/removed_chair.png` — background reconstruction after second removal.*
+*`step_02/removed_distinct_object_.png` — background reconstruction after second removal.*
 
 ---
 
 ### Step 3
 
-![Step 3 — image entering step](../../static/img/jenga/coco_lama/000/step_03/original.png)
+![Step 3 — image entering step](./coco_lama/step_03/original.png)
 
 *`step_03/original.png` — the image after two removals.*
 
-![Step 3 — detection dots](../../static/img/jenga/coco_lama/000/step_03/detect_viz.png)
+![Step 3 — detection dots](./coco_lama/step_03/detect_viz.png)
 
 *`step_03/detect_viz.png` — Molmo detects remaining objects.*
 
-![Step 3 — pre-removal annotation](../../static/img/jenga/coco_lama/000/step_03/pre_removal.png)
+![Step 3 — pre-removal annotation](./coco_lama/step_03/pre_removal.png)
 
 *`step_03/pre_removal.png` — third object selected for removal.*
 
-![Step 3 — after removal](../../static/img/jenga/coco_lama/000/step_03/removed_table.png)
+![Step 3 — after removal](./coco_lama/step_03/removed_distinct_object_.png)
 
-*`step_03/removed_table.png` — scene progressively simplified.*
+*`step_03/removed_distinct_object_.png` — scene progressively simplified.*
 
 ---
 
@@ -176,7 +176,7 @@ The pipeline supports two removal backends, selectable via `--remover lama` (def
 
 | LaMa (default) | SD1.5 |
 |----------------|-------|
-| ![LaMa step 1 removal](../../static/img/jenga/coco_lama/000/step_01/removed_person.png) | ![SD step 1 removal](../../static/img/jenga/coco_sd/000/step_01/removed_person.png) |
+| ![LaMa step 1 removal](./coco_lama/step_01/removed_distinct_object_.png) | ![SD step 1 removal](./coco_sd/step_01/removed_distinct_object_.png) |
 | Clean background reconstruction | May hallucinate a replacement object |
 
 ### Why LaMa is preferred
@@ -303,10 +303,11 @@ bash run_tests.sh --smoke   # unit + quick GPU sanity check
 This page documents a reproduction of the Visual Jenga method. Please cite the original paper if you use this work:
 
 ```bibtex
-@article{visualjenga,
+@article{bhattad2025visualjenga,
   title   = {Visual Jenga: Discovering Object Dependencies via Counterfactual Inpainting},
-  author  = {[Original Authors]},
-  year    = {[Year]},
+  author  = {Bhattad, Anand and Preechakul, Konpat and Efros, Alexei A.},
+  journal = {arXiv preprint arXiv:2503.21770},
+  year    = {2025},
 }
 ```
 
