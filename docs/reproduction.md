@@ -55,9 +55,9 @@ The pipeline has two strictly alternating phases per removal step, designed to s
 
 ### Phase A — Detect and Segment
 
-1. **Detect (Molmo-7B):** The 7B multimodal model receives the current image with the fixed prompt `"Point to every distinct object."` and outputs XML-like `<point x="..." y="...">label</point>` tags. Coordinates are in the range $[0, 100]$ and are normalised to $[0, 1]$. A spatial NMS pass (minimum distance 0.05 in fractional coords) removes near-duplicate detections.
+1. **Detect (Molmo-7B):** The 7B multimodal model receives the current image with the fixed prompt `"Point to every distinct object."` and outputs XML-like `<point x="..." y="...">label</point>` tags. Coordinates are in the range $[0, 100]$ and are normalised to $[0, 1]$. A spatial NMS pass removes near-duplicate detections.
 
-2. **Segment (SAM2):** Each surviving detection point is passed to SAM2 as a foreground prompt, producing a binary mask. Duplicate masks (IoU > 0.85) are deduplicated, keeping the larger one. Results are cached by fractional coordinate so that unchanged objects are not re-segmented on subsequent steps.
+2. **Segment (SAM2):** Each surviving detection point is passed to SAM2 as a foreground prompt, producing a binary mask. Duplicate masks (IoU > 0.85) are deduplicated, keeping the larger one. Results are cached by fractional coordinate so unchanged objects are not re-segmented on subsequent steps.
 
 Molmo is fully unloaded and GPU cache flushed before SAM2 loads; SAM2 is then unloaded before Phase B begins.
 
